@@ -10,6 +10,9 @@
 #include <sys/epoll.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
+#include <arpa/inet.h>
+
+#define BUFSIZE 2048
 
 
 char *executable = NULL;
@@ -31,6 +34,15 @@ void show_usage() {
           "  -m, --mode=tun|tap\n"
           "  -q, --multi_queue          multiple queue\n"
           "  -h, --help                 print help message and exit\n");
+}
+
+
+int epoll_set(int poll_fd, int op, int fd, uint32_t events) {
+  struct epoll_event event = {
+    .events = events,
+    .data = { .fd = fd }
+  };
+  return epoll_ctl(poll_fd, op, fd, &event);
 }
 
 
@@ -69,8 +81,8 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  int fd = open("/dev/net/tun", O_RDWR);
-  if (fd < 0) {
+  int tun_fd = open("/dev/net/tun", O_RDWR);
+  if (tun_fd < 0) {
     perror("ERROR: failed to open tun device");
     exit(EXIT_FAILURE);
   }
@@ -79,92 +91,75 @@ int main(int argc, char **argv) {
   ifr.ifr_flags = flags | mode;
   strncpy(ifr.ifr_name, argv[optind], IFNAMSIZ);
 
-  if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
+  if (ioctl(tun_fd, TUNSETIFF, &ifr) < 0) {
     perror("ERROR: ioctl");
     exit(EXIT_FAILURE);
   }
 
-  int poll = epoll_create(1);
-
-
+  int poll_fd = epoll_create(1);
   struct epoll_event event = {0};
   uint32_t tun_events = EPOLLIN;
 
-  event.events = EPOLLIN;
-  event.data.fd = STDIN_FILENO;
-  epoll_ctl(poll, EPOLL_CTL_ADD, STDIN_FILENO, &event);
+  epoll_set(poll_fd, EPOLL_CTL_ADD, STDIN_FILENO, EPOLLIN);
+  epoll_set(poll_fd, EPOLL_CTL_ADD, STDOUT_FILENO, 0);
+  epoll_set(poll_fd, EPOLL_CTL_ADD, tun_fd, tun_events);
 
-  event.events = 0;
-  event.data.fd = STDOUT_FILENO;
-  epoll_ctl(poll, EPOLL_CTL_ADD, STDOUT_FILENO, &event);
+  /*
+   * buffer
+   * |<-             2048 bytes              ->|
+   * +-------------+------------------+--------+
+   * |   length    |      payload     | unused |
+   * +-------------+------------------+--------+
+   * |<- 2 bytes ->|<- length bytes ->|
+   */
 
-  event.events = tun_events;
-  event.data.fd = fd;
-  epoll_ctl(poll, EPOLL_CTL_ADD, fd, &event);
-
+  /* STDIN -> from_port_buffer -> tun */
   ssize_t from_port_length = 0;
-  char from_port_buffer[2048];
-  ssize_t to_port_length = 0;
-  char to_port_buffer[2048];
+  char from_port_buffer[BUFSIZE];
+  /* tun -> from_tun_buffer -> STDOUT */
+  ssize_t from_tun_length = 0;
+  char from_tun_buffer[BUFSIZE];
 
   for (;;) {
-    int nfds = epoll_wait(poll, &event, 1, -1);
+    int nfds = epoll_wait(poll_fd, &event, 1, -1);
 
     if (nfds == -1) {
       if (errno == EINTR)
         continue;
-      perror("epoll_wait");
+      perror("ERROR: epoll_wait");
       exit(EXIT_FAILURE);
     }
 
-    int event_fd = event.data.fd;
-    if (event_fd == fd) {
-
+    if (event.data.fd == tun_fd) {
       if (event.events == EPOLLIN) {
-        to_port_length = read(fd, to_port_buffer+2, 2046);
-        *(unsigned char *)to_port_buffer = (to_port_length >> 8) & 0xFF;       
-        *(unsigned char *)(to_port_buffer+1) = to_port_length & 0xFF;
-
-        event.events = EPOLLOUT;
-        event.data.fd = STDOUT_FILENO;
-        epoll_ctl(poll, EPOLL_CTL_MOD, STDOUT_FILENO, &event);
-
+        /* tun is ready to read */
+        from_tun_length = read(tun_fd, from_tun_buffer+2, BUFSIZE-2);
+        *(uint16_t *)from_tun_buffer = htons(from_tun_length);
+        epoll_set(poll_fd, EPOLL_CTL_MOD, STDOUT_FILENO, EPOLLOUT);
         tun_events &= ~EPOLLIN;
       } else if (event.events == EPOLLOUT) {
-        write(fd, from_port_buffer+2, from_port_length);
-
-        event.events = EPOLLIN;
-        event.data.fd = STDIN_FILENO;
-        epoll_ctl(poll, EPOLL_CTL_MOD, STDIN_FILENO, &event);
-
+        /* tun is ready to write */
+        write(tun_fd, from_port_buffer+2, from_port_length);
+        epoll_set(poll_fd, EPOLL_CTL_MOD, STDIN_FILENO, EPOLLIN);
         tun_events &= ~EPOLLOUT;
       }
-
-    } else if (event_fd == STDIN_FILENO) {
+    } else if (event.data.fd == STDIN_FILENO) {
+      /* port is ready to read */
       if (read(STDIN_FILENO, from_port_buffer, 2) <= 0)
         break;
 
-      from_port_length = (((unsigned char)from_port_buffer[0]) << 8) | ((unsigned char)from_port_buffer[1]);
+      from_port_length = ntohs(*(uint16_t *)from_port_buffer);
       read(STDIN_FILENO, from_port_buffer+2, from_port_length);
-
-      event.events = 0;
-      event.data.fd = event_fd;
-      epoll_ctl(poll, EPOLL_CTL_MOD, event_fd, &event);
-
+      epoll_set(poll_fd, EPOLL_CTL_MOD, STDIN_FILENO, 0);
       tun_events |= EPOLLOUT;
-    } else if (event_fd == STDOUT_FILENO) {
-      write(STDOUT_FILENO, to_port_buffer, to_port_length+2);
-
-      event.events = 0;
-      event.data.fd = event_fd;
-      epoll_ctl(poll, EPOLL_CTL_MOD, event_fd, &event);
-
+    } else if (event.data.fd == STDOUT_FILENO) {
+      /* port is ready to write */
+      write(STDOUT_FILENO, from_tun_buffer, from_tun_length+2);
+      epoll_set(poll_fd, EPOLL_CTL_MOD, STDOUT_FILENO, 0);
       tun_events |= EPOLLIN;
     }
 
-    event.events = tun_events;
-    event.data.fd = fd;
-    epoll_ctl(poll, EPOLL_CTL_MOD, fd, &event);
+    epoll_set(poll_fd, EPOLL_CTL_MOD, tun_fd, tun_events);
   }
 
   return 0;

@@ -1,17 +1,29 @@
 -module(ext_tuntap_port).
 
--export([start/1, send/2]).
+-export([start/1, start/2, send/2]).
 
 
-start(Options) ->
-    Args = [<<"tap0">>],
+start(Name) ->
+    start(Name, []).
+
+
+start(Name, Options) ->
+    Name1 = tuntap_name(Name),
+    Args = [Name1],
 
     Mode =
-        case proplists:get_value(mode, Options, tap) of
+        case proplists:get_value(mode, Options) of
             tun ->
                 <<"tun">>;
             tap ->
-                <<"tap">>
+                <<"tap">>;
+            undefined ->
+                case Name1 of
+                    <<"tun", _/binary>> ->
+                        <<"tun">>;
+                    <<"tap", _/binary>> ->
+                        <<"tap">>
+                end
         end,
 
     Args1 = [<<"--mode=", Mode/binary>>|Args],
@@ -33,6 +45,14 @@ start(Options) ->
            {args, Args2}]),
 
     {ok, Pid}.
+
+
+tuntap_name(Name)
+  when is_binary(Name) ->
+    Name;
+tuntap_name(Name)
+  when is_atom(Name) ->
+    atom_to_binary(Name, latin1).
 
 
 send(Port, Data) ->
