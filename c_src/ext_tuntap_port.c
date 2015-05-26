@@ -210,7 +210,7 @@ int main (int argc, char **argv) {
 			} else
 			if (event.events == EPOLLOUT) {
 				/* device is ready to write */
-                /*
+				/*
 				 * PORT_OUT(STDIN)  -> from_port_buffer -> DEV
 				 *                     DATA                *OUT*
 				 * ==>
