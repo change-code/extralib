@@ -80,8 +80,8 @@ int main(int argc, char **argv) {
   strncpy(ifr.ifr_name, argv[optind], IFNAMSIZ);
 
   if (ioctl(fd, TUNSETIFF, &ifr) < 0) {
-    perror("ERRRO: ioctl");
-    return 1;
+    perror("ERROR: ioctl");
+    exit(EXIT_FAILURE);
   }
 
   int poll = epoll_create(1);
