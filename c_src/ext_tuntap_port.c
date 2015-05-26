@@ -123,7 +123,7 @@ int main (int argc, char **argv) {
 	/* one event once */
 
 	/*
-     * PORT_OUT(STDIN)  -> from_port_buffer -> DEV
+	 * PORT_OUT(STDIN)  -> from_port_buffer -> DEV
 	 * IN
 	 * PORT_IN(STDOUT)  <- to_port_buffer   <- DEV
 	 *                                         IN
