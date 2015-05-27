@@ -17,7 +17,7 @@ int main (int argc, char **argv) {
 	int open_device() {
 		void cmd_options (struct ifreq * ifr) {
 			void show_usage () {
-				fprintf(stderr, "Usage: %s [options] IFNAME\n", argv[0]);
+				fprintf(stderr, "Usage: %s [options] [IFNAME]\n", argv[0]);
 				fprintf(stderr, "\n"
 					            "  -m, --mode=tun|tap\n"
 					            "  -q, --multi_queue          multiple queue\n"
@@ -30,12 +30,6 @@ int main (int argc, char **argv) {
 				{"help",         no_argument,       NULL, 'h'},
 				{NULL,           no_argument,       NULL, 0}
 			};
-
-			if (optind >= argc) {
-				fprintf(stderr, "missing interface name\n");
-				show_usage();
-				exit(EXIT_FAILURE);
-			}
 
 			int opt, index;
 			while ((opt = getopt_long(argc, argv, "+m:qh", options, &index)) != -1) {
@@ -67,8 +61,13 @@ int main (int argc, char **argv) {
 				exit(EXIT_FAILURE);
 			}
 
+			if (optind >= argc) {
+				fprintf(stderr, "missing interface name\n");
+				/* Let the kernel driver decide the name. */
+			} else {
+				strncpy(ifr->ifr_name, argv[optind], IFNAMSIZ);
+			}
 			ifr->ifr_flags |= IFF_NO_PI;
-			strncpy(ifr->ifr_name, argv[optind], IFNAMSIZ);
 		}
 
 		struct ifreq ifr;
@@ -86,6 +85,9 @@ int main (int argc, char **argv) {
 			perror("ERROR: ioctl");
 			exit(EXIT_FAILURE);
 		}
+
+		fprintf(stdout, "ok.%s", ifr.ifr_name);
+		fflush(stdout);
 		return(fd);
 	}
 
