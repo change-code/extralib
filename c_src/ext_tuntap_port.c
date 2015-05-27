@@ -13,6 +13,8 @@
 #include <linux/if_tun.h>
 #include <arpa/inet.h>
 
+#define PACKET_LEN_BYTE 2
+#define BUFSIZE_BASE 65536
 int main (int argc, char **argv) {
 	int open_device() {
 		void cmd_options (struct ifreq * ifr) {
@@ -86,8 +88,16 @@ int main (int argc, char **argv) {
 			exit(EXIT_FAILURE);
 		}
 
-		fprintf(stdout, "ok.%s", ifr.ifr_name);
-		fflush(stdout);
+		char buf[PACKET_LEN_BYTE+3+IFNAMSIZ];
+		uint16_t size, size_n;
+		snprintf(buf+PACKET_LEN_BYTE, 3+IFNAMSIZ, "ok.%s", ifr.ifr_name);
+		size = strlen(buf+PACKET_LEN_BYTE);
+		size_n = htons(size);
+		memcpy(buf, &size_n, PACKET_LEN_BYTE);
+		if( write(STDOUT_FILENO, buf, size+PACKET_LEN_BYTE) == -1) {
+			perror("ERROR: write");
+			exit(EXIT_FAILURE);
+		}
 		return(fd);
 	}
 
@@ -111,8 +121,7 @@ int main (int argc, char **argv) {
 		}
 	}
 
-	int const packet_len_byte_No = 2;
-	int const BUFSIZE = 65536 + packet_len_byte_No;
+	int const BUFSIZE = BUFSIZE_BASE + PACKET_LEN_BYTE;
 	ssize_t from_port_length;
 	char from_port_buffer[BUFSIZE];
 	ssize_t to_port_length;
@@ -159,13 +168,13 @@ int main (int argc, char **argv) {
 			tun_event |= EPOLLOUT;
 			epoll_mod(tun_event, poll, device_fd);
 
-			if (read(STDIN_FILENO, from_port_buffer, packet_len_byte_No) == -1) {
+			if (read(STDIN_FILENO, from_port_buffer, PACKET_LEN_BYTE) == -1) {
 				perror("read STDIN");
 				exit(EXIT_FAILURE);
 			}
-			assert(packet_len_byte_No == 2);
+			assert(PACKET_LEN_BYTE == 2);
 			from_port_length = ntohs(*((uint16_t*)from_port_buffer));
-			if (read(STDIN_FILENO, from_port_buffer + packet_len_byte_No, from_port_length) == -1) {
+			if (read(STDIN_FILENO, from_port_buffer + PACKET_LEN_BYTE, from_port_length) == -1) {
 				perror("read STDIN");
 				exit(EXIT_FAILURE);
 			}
@@ -183,7 +192,7 @@ int main (int argc, char **argv) {
 			tun_event |= EPOLLIN;
 			epoll_mod(tun_event, poll, device_fd);
 
-			if (write(STDOUT_FILENO, to_port_buffer, to_port_length + packet_len_byte_No) == -1) {
+			if (write(STDOUT_FILENO, to_port_buffer, to_port_length + PACKET_LEN_BYTE) == -1) {
 				perror("write STDOUT");
 				exit(EXIT_FAILURE);
 			}
@@ -202,13 +211,13 @@ int main (int argc, char **argv) {
 				tun_event &= ~EPOLLIN;
 				epoll_mod(tun_event, poll, device_fd);
 
-				to_port_length = read(device_fd, to_port_buffer + packet_len_byte_No, BUFSIZE - packet_len_byte_No);
+				to_port_length = read(device_fd, to_port_buffer + PACKET_LEN_BYTE, BUFSIZE - PACKET_LEN_BYTE);
 				if (to_port_length == -1) {
 					perror("read tun device");
 					exit(EXIT_FAILURE);
 				}
 				uint16_t length = htons(to_port_length);
-				memcpy(to_port_buffer, &length, packet_len_byte_No);
+				memcpy(to_port_buffer, &length, PACKET_LEN_BYTE);
 			} else
 			if (event.events == EPOLLOUT) {
 				/* device is ready to write */
@@ -223,7 +232,7 @@ int main (int argc, char **argv) {
 				tun_event &= ~EPOLLOUT;
 				epoll_mod(tun_event, poll, device_fd);
 
-				if (write(device_fd, from_port_buffer + packet_len_byte_No, from_port_length) == -1) {
+				if (write(device_fd, from_port_buffer + PACKET_LEN_BYTE, from_port_length) == -1) {
 					perror("write tun device");
 					exit(EXIT_FAILURE);
 				}
