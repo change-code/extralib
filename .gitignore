@@ -1,5 +1,7 @@
 *~
 *.o
+*.beam
 ebin/
 priv/
 .rebar/
+logs/

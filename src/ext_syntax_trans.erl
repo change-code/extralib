@@ -2,6 +2,7 @@
 
 -export([parse_transform/2]).
 
+
 parse_transform(Forms, Options) ->
     Includes = proplists:get_all_values(i, Options),
     Macros =
@@ -11,14 +12,14 @@ parse_transform(Forms, Options) ->
           end
           || Macro <- proplists:lookup_all(d, Options)],
 
-    [{attribute, _, file, {Filename, 1}}|_] = Forms,
+    [{attribute, _, file, {FileName, 1}}|_] = Forms,
     [{Module, Fun, ParserOptions}] =
         [ Parser
-          || {attribute, _, parser, Parser} <- Forms ],
+          || {attribute, _, compile, {parser, Parser}} <- Forms ],
 
     {ok, Forms1} =
         Module:Fun(
-          Filename,
+          FileName,
           [{includes, Includes}, {macros, Macros}
            |ParserOptions]),
 
@@ -28,7 +29,7 @@ parse_transform(Forms, Options) ->
              case Form of
                  {attribute, _, compile, {parse_transform, _}} ->
                      false;
-                 {attribute, _, parser, _} ->
+                 {attribute, _, compile, {parser, _}} ->
                      false;
                  _ ->
                      true
