@@ -1,16 +1,19 @@
+#define _GNU_SOURCE
 #include <errno.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <getopt.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <sched.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <getopt.h>
+#include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/epoll.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
-#include <arpa/inet.h>
 
 #define BUFSIZE 2048
 
@@ -18,11 +21,13 @@
 char *executable = NULL;
 short mode = 0;
 short flags = IFF_NO_PI;
+char *netns = NULL;
 
 
 struct option options[] = {
   {"mode",         required_argument, NULL, 'm'},
   {"multi_queue",  optional_argument, NULL, 'q'},
+  {"netns",        required_argument, NULL, 'n'},
   {"help",         no_argument,       NULL, 'h'},
   {NULL,           no_argument,       NULL, 0}
 };
@@ -33,6 +38,7 @@ void show_usage() {
   fprintf(stderr, "\n"
           "  -m, --mode=tun|tap\n"
           "  -q, --multi_queue          multiple queue\n"
+          "  -n, --netns=NETNS          network namespace\n"
           "  -h, --help                 print help message and exit\n");
 }
 
@@ -50,7 +56,7 @@ int main(int argc, char **argv) {
   executable = argv[0];
 
   int opt, index;
-  while((opt = getopt_long(argc, argv, "+m:qh", options, &index)) != -1) {
+  while((opt = getopt_long(argc, argv, "+m:qn:h", options, &index)) != -1) {
     switch (opt) {
     case 'm':
       if (!strcmp(optarg, "tun")) {
@@ -61,6 +67,9 @@ int main(int argc, char **argv) {
       break;
     case 'q':
       flags |= IFF_MULTI_QUEUE;
+      break;
+    case 'n':
+      netns = optarg;
       break;
     case 'h':
     default:
@@ -79,6 +88,24 @@ int main(int argc, char **argv) {
     fprintf(stderr, "missing mode\n");
     show_usage();
     exit(EXIT_FAILURE);
+  }
+
+  if (netns) {
+    char ns_path[PATH_MAX] = {0};
+    snprintf(ns_path, PATH_MAX, "/var/run/netns/%s", netns);
+
+    int ns_fd = open(ns_path, O_RDONLY);
+    if (ns_fd == -1) {
+      perror("failed to open netns");
+      exit(EXIT_FAILURE);
+    }
+
+    if (setns(ns_fd, CLONE_NEWNET) == -1) {
+      perror("setns");
+      exit(EXIT_FAILURE);
+    }
+
+    close(ns_fd);
   }
 
   int tun_fd = open("/dev/net/tun", O_RDWR);

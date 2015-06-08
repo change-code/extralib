@@ -8,7 +8,7 @@ start(Name) ->
 
 
 start(Name, Options) ->
-    Name1 = tuntap_name(Name),
+    Name1 = name_to_binary(Name),
     Args = [Name1],
 
     Mode =
@@ -35,6 +35,15 @@ start(Name, Options) ->
                 Args1
         end,
 
+    Args3 =
+        case proplists:lookup(netns, Options) of
+            none ->
+                Args2;
+            {netns, Netns} ->
+                Netns1 = name_to_binary(Netns),
+                [<<"--netns=", Netns1/binary>>|Args2]
+        end,
+
     Dir = code:lib_dir(extralib, priv),
 
     Pid =
@@ -42,17 +51,20 @@ start(Name, Options) ->
           {spawn_executable, [Dir, "/ext_tuntap_port"]},
           [{packet, 2},
            binary,
-           {args, Args2}]),
+           {args, Args3}]),
 
     {ok, Pid}.
 
 
-tuntap_name(Name)
+name_to_binary(Name)
   when is_binary(Name) ->
     Name;
-tuntap_name(Name)
+name_to_binary(Name)
   when is_atom(Name) ->
-    atom_to_binary(Name, latin1).
+    atom_to_binary(Name, latin1);
+name_to_binary(Name)
+  when is_list(Name) ->
+    list_to_binary(Name).
 
 
 send(Port, Data) ->
